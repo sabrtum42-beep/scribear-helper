@@ -10,10 +10,16 @@ app = Flask(__name__)
 KEY = os.environ.get("HELPER_KEY", "")
 MAX_HOURS = float(os.environ.get("MAX_HOURS", "4"))
 COOKIES = None
-if os.environ.get("YT_COOKIES"):
+_cookie_text = os.environ.get("YT_COOKIES", "")
+for _p in ("/etc/secrets/cookies.txt", "/app/cookies.txt"):  # Render "Secret File" or repo file
+    if not _cookie_text and os.path.isfile(_p):
+        with open(_p, encoding="utf-8", errors="ignore") as f:
+            _cookie_text = f.read()
+if _cookie_text.strip():
+    # yt-dlp writes back to the cookie file, so use a writable copy
     COOKIES = os.path.join(tempfile.gettempdir(), "cookies.txt")
-    with open(COOKIES, "w") as f:
-        f.write(os.environ["YT_COOKIES"])
+    with open(COOKIES, "w", encoding="utf-8") as f:
+        f.write(_cookie_text)
 busy = threading.Semaphore(2)
 
 
@@ -31,7 +37,8 @@ def err(msg, code=400):
 
 @app.route("/")
 def home():
-    return jsonify(ok=True, service="ScribeAR link helper", yt_dlp=yt_dlp.version.__version__)
+    return jsonify(ok=True, service="ScribeAR link helper", yt_dlp=yt_dlp.version.__version__,
+                   cookies_loaded=bool(COOKIES))
 
 
 @app.route("/audio", methods=["GET", "OPTIONS"])
@@ -78,7 +85,9 @@ def audio():
         shutil.rmtree(tmp, ignore_errors=True)
         m = str(e)
         if "Sign in to confirm" in m or "bot" in m.lower():
-            return err("YouTube is blocking the helper as a bot. Add YT_COOKIES (see setup notes) or try again later.", 502)
+            if COOKIES:
+                return err("YouTube is still blocking the helper even with cookies. Export fresh cookies and update the cookies.txt secret file.", 502)
+            return err("YouTube is blocking the helper as a bot. Add your YouTube cookies as a cookies.txt secret file on Render.", 502)
         return err("Download failed: " + m.replace("ERROR: ", "")[:300], 502)
     except Exception as e:
         shutil.rmtree(tmp, ignore_errors=True)
